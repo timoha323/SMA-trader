@@ -43,7 +43,7 @@ int main() {
     LOG_INFO("Server is running on port 8080...");
 
     LOG_INFO("Start thread pool on 5 threads");
-    ThreadPool threadPoolOnFive(5);
+    ThreadPool threadPool(10);
     PriceBuffer priceBuffer;
 
     while (true) {
@@ -83,7 +83,7 @@ int main() {
 
             LOG_INFO("Received file " + fileName + " as #" + to_string(counter));
 
-            threadPoolOnFive.enqueue([counter, fullPath, &priceBuffer]() {
+            threadPool.enqueue([counter, fullPath, &priceBuffer]() {
                 LOG_INFO("Task " + to_string(counter) + " started");
                 PriceFile file(fullPath);
                 for (const auto& timeAndPrice : file.timeToPrice) {

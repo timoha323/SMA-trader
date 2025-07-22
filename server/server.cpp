@@ -9,6 +9,7 @@
 #include <netinet/in.h>
 #include <string>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 
 using namespace std;
@@ -45,6 +46,73 @@ int main() {
     LOG_INFO("Start thread pool on 5 threads");
     ThreadPool threadPool(10);
     PriceBuffer priceBuffer;
+    atomic<int> position(0); // long = 1; short = -1; neutral = 0
+    atomic<double> balance(100'000.0);
+    atomic<int> actives(10);
+
+    std::thread predictionThread([&priceBuffer, &position, &balance, &actives]() {
+        int tries = 0;
+        const int maxTriesToPredict = 8;
+        double lastPrice = -1.0;
+        auto goSleep = [](int tries, int maxTriesToPredict) {
+            if (tries < maxTriesToPredict) {
+                std::this_thread::sleep_for(std::chrono::microseconds(50));
+            } else {
+                int shift = tries - maxTriesToPredict;
+                auto delay = std::chrono::microseconds(1 << (shift > 10 ? 10 : shift));
+                std::this_thread::sleep_for(delay);
+            }
+        };
+
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+
+            if (priceBuffer.empty()) {
+                goSleep(tries, maxTriesToPredict);
+                continue;
+            }
+            double currentPrice = priceBuffer.getCurrentPrice();
+            if (lastPrice == currentPrice) {
+                goSleep(tries, maxTriesToPredict);
+                continue;
+            }
+            lastPrice = currentPrice;
+            double sma = priceBuffer.getAverage();
+
+            LOG_INFO("Prediction thread: Current price = " 
+                    + std::to_string(currentPrice) 
+                    + ", SMA = " + std::to_string(sma)
+                    + ", BALANCE = " + std::to_string(balance.load()));
+
+            if (currentPrice > sma && position.load() <= 0) {
+                //buy();
+                LOG("EVENT", "Buying");
+                
+                double expected = balance.load();
+                double desired;
+                do {
+                    desired = expected - currentPrice;
+                } while (!balance.compare_exchange_weak(expected, desired));
+                position.store(1);
+                actives.fetch_add(1);
+            }
+            else if (currentPrice < sma && position.load() >= 0) {
+                //sell();
+                if (actives.load() > 0) {
+                    LOG("EVENT", "Selling");
+                    double expected = balance.load();
+                    double desired;
+                    do {
+                        desired = expected + currentPrice;
+                    } while (!balance.compare_exchange_weak(expected, desired));
+                    position.store(-1);
+                    actives.fetch_sub(1);
+                }
+            }
+
+        }
+    });
+
 
     while (true) {
         int clientSocket = accept(serverSocket, nullptr, nullptr);
@@ -89,11 +157,11 @@ int main() {
                 for (const auto& timeAndPrice : file.timeToPrice) {
                     priceBuffer.push(timeAndPrice.second);
                 }
-                LOG_INFO("Price Buffer updated. Current price: "
-                    + to_string(priceBuffer.getCurrentPrice())
-                    + ". Current SMA: "
-                    + to_string(priceBuffer.getAverage())
-                    + ".");
+                // LOG_INFO("Price Buffer updated. Current price: "
+                //     + to_string(priceBuffer.getCurrentPrice())
+                //     + ". Current SMA: "
+                //     + to_string(priceBuffer.getAverage())
+                //     + ".");
             });
 
             ++counter;

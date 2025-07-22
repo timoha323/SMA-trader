@@ -16,6 +16,8 @@ public:
     double getAverage();
     double getCurrentPrice();
 
+    bool empty();
+
 private:
     SpinLock onWriteMutex_;
     std::deque<double> priceBuffer_;

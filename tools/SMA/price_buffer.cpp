@@ -28,3 +28,8 @@ double PriceBuffer::getCurrentPrice() {
     SpinLockGuard spinlockGuard(onWriteMutex_);
     return priceBuffer_.back();
 }
+
+bool PriceBuffer::empty() {
+    SpinLockGuard spinlockGuard(onWriteMutex_);
+    return priceBuffer_.empty();
+}

@@ -1,0 +1,28 @@
+{
+  "user": {
+    "id": 12345,
+    "username": "john_doe",
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@example.com",
+    "phone": "+1234567890",
+    "address": {
+      "street": "123 Main St",
+      "city": "Springfield",
+      "country": "USA",
+      "postalCode": "62701"
+    },
+    "dateOfBirth": "1990-05-15",
+    "registrationDate": "2023-10-01T14:30:00Z",
+    "isActive": true,
+    "roles": ["user", "editor"],
+    "preferences": {
+      "theme": "dark",
+      "notifications": {
+        "email": true,
+        "sms": false
+      }
+    }
+  }
+}
+

@@ -1,0 +1,40 @@
+"C:\Program Files\JetBrains\CLion 2024.2.1\bin\cmake\win\x64\bin\cmake.exe" -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_MAKE_PROGRAM=C:/Program Files/JetBrains/CLion 2024.2.1/bin/ninja/win/x64/ninja.exe" -G Ninja -S \\wsl.localhost\Ubuntu\home\timoha323\pingService -B \\wsl.localhost\Ubuntu\home\timoha323\pingService\cmake-build-debug
+-- The C compiler identification is GNU 14.2.0
+-- The CXX compiler identification is GNU 14.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - failed
+-- Check for working C compiler: C:/mingw64/bin/gcc.exe
+-- Check for working C compiler: C:/mingw64/bin/gcc.exe - broken
+CMake Error at C:/Program Files/JetBrains/CLion 2024.2.1/bin/cmake/win/x64/share/cmake-3.29/Modules/CMakeTestCCompiler.cmake:67 (message):
+  The C compiler
+
+    "C:/mingw64/bin/gcc.exe"
+
+  is not able to compile a simple test program.
+
+  It fails with the following output:
+
+    Change Dir: '//wsl.localhost/Ubuntu/home/timoha323/pingService/cmake-build-debug/CMakeFiles/CMakeScratch/TryCompile-s1ag0x'
+    
+    Run Build Command(s): "C:/Program Files/JetBrains/CLion 2024.2.1/bin/ninja/win/x64/ninja.exe" -v cmTC_a5dd5
+    [1/2] C:\mingw64\bin\gcc.exe   -fdiagnostics-color=always -o CMakeFiles/cmTC_a5dd5.dir/testCCompiler.c.obj -c //wsl.localhost/Ubuntu/home/timoha323/pingService/cmake-build-debug/CMakeFiles/CMakeScratch/TryCompile-s1ag0x/testCCompiler.c
+    [2/2] C:\WINDOWS\system32\cmd.exe /C "cd . && C:\mingw64\bin\gcc.exe   CMakeFiles/cmTC_a5dd5.dir/testCCompiler.c.obj -o cmTC_a5dd5.exe -Wl,--out-implib,libcmTC_a5dd5.dll.a -Wl,--major-image-version,0,--minor-image-version,0  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 && cd ."
+    FAILED: cmTC_a5dd5.exe 
+    C:\WINDOWS\system32\cmd.exe /C "cd . && C:\mingw64\bin\gcc.exe   CMakeFiles/cmTC_a5dd5.dir/testCCompiler.c.obj -o cmTC_a5dd5.exe -Wl,--out-implib,libcmTC_a5dd5.dll.a -Wl,--major-image-version,0,--minor-image-version,0  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 && cd ."
+    "\\wsl.localhost\Ubuntu\home\timoha323\pingService\cmake-build-debug\CMakeFiles\CMakeScratch\TryCompile-s1ag0x"
+    Указанный путь был использован при запуске CMD.EXE в качестве текущей папки.
+    CMD.EXE не поддерживает пути UNC. По умолчанию выбрана системная папка Windows.
+    C:/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/14.2.0/../../../../x86_64-w64-mingw32/bin/ld.exe: cannot open output file cmTC_a5dd5.exe: Permission denied
+    collect2.exe: error: ld returned 1 exit status
+    ninja: build stopped: subcommand failed.
+    
+    
+
+  
+
+  CMake will not be able to correctly generate this project.
+Call Stack (most recent call first):
+  CMakeLists.txt:2 (project)
+
+
+-- Configuring incomplete, errors occurred!

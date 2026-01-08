@@ -1,0 +1,3 @@
+C:/Users/makar/sma/SMA-trader/server/build/CMakeFiles/server.dir
+C:/Users/makar/sma/SMA-trader/server/build/CMakeFiles/edit_cache.dir
+C:/Users/makar/sma/SMA-trader/server/build/CMakeFiles/rebuild_cache.dir

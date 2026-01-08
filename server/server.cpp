@@ -3,44 +3,89 @@
 #include "../tools/SMA/price_buffer.h"
 #include "../file_processing/file_proccessing.h"
 
+#include <algorithm>
 #include <cstring>
+#include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <fstream>
-#include <netinet/in.h>
 #include <string>
-#include <sys/socket.h>
 #include <thread>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using socket_t = SOCKET;
+constexpr socket_t invalid_socket = INVALID_SOCKET;
+inline int close_socket(socket_t s) { return closesocket(s); }
+inline int init_sockets() {
+    WSADATA wsa{};
+    return WSAStartup(MAKEWORD(2, 2), &wsa);
+}
+inline void cleanup_sockets() { WSACleanup(); }
+#else
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
+using socket_t = int;
+constexpr socket_t invalid_socket = -1;
+inline int close_socket(socket_t s) { return close(s); }
+inline int init_sockets() { return 0; }
+inline void cleanup_sockets() {}
+#endif
 
 using namespace std;
 
-uint32_t readUInt32(int socket) {
-    uint32_t value;
-    recv(socket, &value, sizeof(value), MSG_WAITALL);
-    return value;
-}
-
-bool readBytes(int socket, char* buffer, size_t size) {
+bool readBytes(socket_t socket, char* buffer, size_t size) {
     size_t total = 0;
     while (total < size) {
-        ssize_t bytes = recv(socket, buffer + total, size - total, 0);
+        int bytes = recv(socket, buffer + total, static_cast<int>(size - total), 0);
         if (bytes <= 0) return false;
         total += bytes;
     }
     return true;
 }
 
+uint32_t readUInt32(socket_t socket) {
+    uint32_t value = 0;
+    if (!readBytes(socket, reinterpret_cast<char*>(&value), sizeof(value))) {
+        return 0;
+    }
+    return ntohl(value);
+}
+
 int main() {
     int counter = 1;
-    int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (init_sockets() != 0) {
+        LOG_ERROR("Failed to initialize sockets");
+        return 1;
+    }
+
+    socket_t serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket == invalid_socket) {
+        LOG_ERROR("Failed to create server socket");
+        cleanup_sockets();
+        return 1;
+    }
 
     sockaddr_in serverAddress{};
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(8080);
     serverAddress.sin_addr.s_addr = INADDR_ANY;
 
-    bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
-    listen(serverSocket, 5);
+    if (bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0) {
+        LOG_ERROR("Failed to bind server socket");
+        close_socket(serverSocket);
+        cleanup_sockets();
+        return 1;
+    }
+    if (listen(serverSocket, 5) < 0) {
+        LOG_ERROR("Failed to listen on server socket");
+        close_socket(serverSocket);
+        cleanup_sockets();
+        return 1;
+    }
     LOG_INFO("Server is running on port 8080...");
 
     LOG_INFO("Start thread pool on 5 threads");
@@ -49,6 +94,15 @@ int main() {
     atomic<int> position(0); // long = 1; short = -1; neutral = 0
     atomic<double> balance(100'000.0);
     atomic<int> actives(10);
+    const string outputDir = "files";
+    std::error_code fsError;
+    std::filesystem::create_directories(outputDir, fsError);
+    if (fsError) {
+        LOG_ERROR("Failed to create output directory: " + outputDir);
+        close_socket(serverSocket);
+        cleanup_sockets();
+        return 1;
+    }
 
     std::thread predictionThread([&priceBuffer, &position, &balance, &actives]() {
         int tries = 0;
@@ -85,18 +139,6 @@ int main() {
                     + ", BALANCE = " + std::to_string(balance.load()));
 
             if (currentPrice > sma && position.load() <= 0) {
-                //buy();
-                LOG("EVENT", "Buying");
-                
-                double expected = balance.load();
-                double desired;
-                do {
-                    desired = expected - currentPrice;
-                } while (!balance.compare_exchange_weak(expected, desired));
-                position.store(1);
-                actives.fetch_add(1);
-            }
-            else if (currentPrice < sma && position.load() >= 0) {
                 //sell();
                 if (actives.load() > 0) {
                     LOG("EVENT", "Selling");
@@ -109,28 +151,39 @@ int main() {
                     actives.fetch_sub(1);
                 }
             }
+            else if (currentPrice < sma && position.load() >= 0) {
+                //buy();
+                LOG("EVENT", "Buying");
+                
+                double expected = balance.load();
+                double desired;
+                do {
+                    desired = expected - currentPrice;
+                } while (!balance.compare_exchange_weak(expected, desired));
+                position.store(1);
+                actives.fetch_add(1);
+            }
 
         }
     });
 
 
     while (true) {
-        int clientSocket = accept(serverSocket, nullptr, nullptr);
-        if (clientSocket < 0) {
+        socket_t clientSocket = accept(serverSocket, nullptr, nullptr);
+        if (clientSocket == invalid_socket) {
             LOG_ERROR("Failed to accept client");
             continue;
         }
 
         while (true) {
-            uint32_t nameLen;
-            ssize_t r = recv(clientSocket, &nameLen, sizeof(nameLen), MSG_WAITALL);
-            if (r == 0 || r < 0) break;
+            uint32_t nameLen = readUInt32(clientSocket);
+            if (nameLen == 0) break;
 
             string fileName(nameLen, 0);
             if (!readBytes(clientSocket, &fileName[0], nameLen)) break;
 
             uint32_t fileSize = readUInt32(clientSocket);
-            string fullPath = "files/" + to_string(counter);
+            string fullPath = outputDir + "/" + to_string(counter);
 
             ofstream outFile(fullPath, ios::binary);
             if (!outFile) {
@@ -142,7 +195,7 @@ int main() {
             size_t total = 0;
             while (total < fileSize) {
                 size_t toRead = min(sizeof(buffer), static_cast<size_t>(fileSize - total));
-                ssize_t bytes = recv(clientSocket, buffer, toRead, 0);
+                int bytes = recv(clientSocket, buffer, static_cast<int>(toRead), 0);
                 if (bytes <= 0) break;
                 outFile.write(buffer, bytes);
                 total += bytes;
@@ -168,10 +221,11 @@ int main() {
         }
 
         const char* reply = "All files received!";
-        send(clientSocket, reply, strlen(reply), 0);
-        close(clientSocket);
+        send(clientSocket, reply, static_cast<int>(strlen(reply)), 0);
+        close_socket(clientSocket);
     }
 
-    close(serverSocket);
+    close_socket(serverSocket);
+    cleanup_sockets();
     return 0;
 }

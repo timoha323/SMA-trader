@@ -2,13 +2,34 @@
 #include "../tools/logger/logger.h"
 
 #include <cstring>
+#include <cstdint>
 #include <iostream>
 #include <fstream>
-#include <netinet/in.h>
 #include <string>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using socket_t = SOCKET;
+constexpr socket_t invalid_socket = INVALID_SOCKET;
+inline int close_socket(socket_t s) { return closesocket(s); }
+inline int init_sockets() {
+    WSADATA wsa{};
+    return WSAStartup(MAKEWORD(2, 2), &wsa);
+}
+inline void cleanup_sockets() { WSACleanup(); }
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <arpa/inet.h>
+using socket_t = int;
+constexpr socket_t invalid_socket = -1;
+inline int close_socket(socket_t s) { return close(s); }
+inline int init_sockets() { return 0; }
+inline void cleanup_sockets() {}
+#endif
 
 using namespace std;
 
@@ -17,7 +38,7 @@ namespace {
     constexpr int FILE_COUNT = 10000;
 }
 
-void sendFile(int socket, const string& filename) {
+void sendFile(socket_t socket, const string& filename) {
     ifstream file(filename, ios::binary);
     if (!file) {
         LOG_ERROR("Failed to open file: " << filename);
@@ -25,30 +46,38 @@ void sendFile(int socket, const string& filename) {
     }
 
     file.seekg(0, ios::end);
-    uint32_t fileSize = file.tellg();
+    uint32_t fileSize = static_cast<uint32_t>(file.tellg());
     file.seekg(0, ios::beg);
 
-    uint32_t nameLength = filename.size();
-    send(socket, &nameLength, sizeof(nameLength), 0);
+    uint32_t nameLength = htonl(static_cast<uint32_t>(filename.size()));
+    send(socket, reinterpret_cast<const char*>(&nameLength), sizeof(nameLength), 0);
 
-    send(socket, filename.c_str(), nameLength, 0);
+    uint32_t nameLengthHost = ntohl(nameLength);
+    send(socket, filename.c_str(), static_cast<int>(nameLengthHost), 0);
 
-    send(socket, &fileSize, sizeof(fileSize), 0);
+    uint32_t fileSizeNet = htonl(fileSize);
+    send(socket, reinterpret_cast<const char*>(&fileSizeNet), sizeof(fileSizeNet), 0);
 
     char buffer[1024];
     while (file.read(buffer, sizeof(buffer)))
-        send(socket, buffer, sizeof(buffer), 0);
+        send(socket, buffer, static_cast<int>(sizeof(buffer)), 0);
 
     if (file.gcount() > 0)
-        send(socket, buffer, file.gcount(), 0);
+        send(socket, buffer, static_cast<int>(file.gcount()), 0);
 
     LOG_INFO("Sent file: " << filename);
 }
 
 int main() {
-    int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (clientSocket < 0) {
+    if (init_sockets() != 0) {
+        LOG_ERROR("Failed to initialize sockets");
+        return 1;
+    }
+
+    socket_t clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (clientSocket == invalid_socket) {
         perror("socket");
+        cleanup_sockets();
         return 1;
     }
 
@@ -59,6 +88,8 @@ int main() {
 
     if (connect(clientSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0) {
         perror("connect");
+        close_socket(clientSocket);
+        cleanup_sockets();
         return 1;
     }
 
@@ -68,12 +99,19 @@ int main() {
         sendFile(clientSocket, filename);
     }
 
-    shutdown(clientSocket, SHUT_WR);
+    shutdown(clientSocket,
+#ifdef _WIN32
+        SD_SEND
+#else
+        SHUT_WR
+#endif
+    );
 
     char response[1024] = {0};
-    recv(clientSocket, response, sizeof(response), 0);
+    recv(clientSocket, response, static_cast<int>(sizeof(response)), 0);
     LOG_INFO("Server replied: " << response);
 
-    close(clientSocket);
+    close_socket(clientSocket);
+    cleanup_sockets();
     return 0;
 }

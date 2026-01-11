@@ -138,7 +138,7 @@ int main() {
                     + ", SMA = " + std::to_string(sma)
                     + ", BALANCE = " + std::to_string(balance.load()));
 
-            if (currentPrice > sma && position.load() <= 0) {
+            if (currentPrice > sma && position.load() >= 0) {
                 //sell();
                 if (actives.load() > 0) {
                     LOG("EVENT", "Selling");
@@ -151,7 +151,7 @@ int main() {
                     actives.fetch_sub(1);
                 }
             }
-            else if (currentPrice < sma && position.load() >= 0) {
+            else if (currentPrice < sma && position.load() <= 0) {
                 //buy();
                 LOG("EVENT", "Buying");
                 

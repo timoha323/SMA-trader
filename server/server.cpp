@@ -74,7 +74,7 @@ int main() {
     serverAddress.sin_port = htons(8080);
     serverAddress.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0) {
+    if (::bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0) {
         LOG_ERROR("Failed to bind server socket");
         close_socket(serverSocket);
         cleanup_sockets();

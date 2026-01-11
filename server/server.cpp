@@ -91,9 +91,12 @@ int main() {
     LOG_INFO("Start thread pool on 5 threads");
     ThreadPool threadPool(10);
     PriceBuffer priceBuffer;
-    atomic<int> position(0); // long = 1; short = -1; neutral = 0
-    atomic<double> balance(100'000.0);
-    atomic<int> actives(10);
+    atomic<int> smaPosition(0); // long = 1; short = -1; neutral = 0
+    atomic<double> smaBalance(100'000.0);
+    atomic<int> smaActives(10);
+    atomic<int> tickPosition(0); // long = 1; short = -1; neutral = 0
+    atomic<double> tickBalance(100'000.0);
+    atomic<int> tickActives(10);
     const string outputDir = "files";
     std::error_code fsError;
     std::filesystem::create_directories(outputDir, fsError);
@@ -104,19 +107,20 @@ int main() {
         return 1;
     }
 
-    std::thread predictionThread([&priceBuffer, &position, &balance, &actives]() {
+    auto goSleep = [](int tries, int maxTriesToPredict) {
+        if (tries < maxTriesToPredict) {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+        } else {
+            int shift = tries - maxTriesToPredict;
+            auto delay = std::chrono::microseconds(1 << (shift > 10 ? 10 : shift));
+            std::this_thread::sleep_for(delay);
+        }
+    };
+
+    std::thread predictionThread([&priceBuffer, &smaPosition, &smaBalance, &smaActives, &goSleep]() {
         int tries = 0;
         const int maxTriesToPredict = 8;
         double lastPrice = -1.0;
-        auto goSleep = [](int tries, int maxTriesToPredict) {
-            if (tries < maxTriesToPredict) {
-                std::this_thread::sleep_for(std::chrono::microseconds(50));
-            } else {
-                int shift = tries - maxTriesToPredict;
-                auto delay = std::chrono::microseconds(1 << (shift > 10 ? 10 : shift));
-                std::this_thread::sleep_for(delay);
-            }
-        };
 
         while (true) {
             std::this_thread::sleep_for(std::chrono::microseconds(50));
@@ -136,34 +140,96 @@ int main() {
             LOG_INFO("Prediction thread: Current price = " 
                     + std::to_string(currentPrice) 
                     + ", SMA = " + std::to_string(sma)
-                    + ", BALANCE = " + std::to_string(balance.load()));
+                    + ", BALANCE = " + std::to_string(smaBalance.load()));
 
-            if (currentPrice > sma && position.load() >= 0) {
+            if (currentPrice > sma && smaPosition.load() >= 0) {
                 //sell();
-                if (actives.load() > 0) {
+                if (smaActives.load() > 0) {
                     LOG("EVENT", "Selling");
-                    double expected = balance.load();
+                    double expected = smaBalance.load();
                     double desired;
                     do {
                         desired = expected + currentPrice;
-                    } while (!balance.compare_exchange_weak(expected, desired));
-                    position.store(-1);
-                    actives.fetch_sub(1);
+                    } while (!smaBalance.compare_exchange_weak(expected, desired));
+                    smaPosition.store(-1);
+                    smaActives.fetch_sub(1);
                 }
             }
-            else if (currentPrice < sma && position.load() <= 0) {
+            else if (currentPrice < sma && smaPosition.load() <= 0) {
                 //buy();
                 LOG("EVENT", "Buying");
                 
-                double expected = balance.load();
+                double expected = smaBalance.load();
                 double desired;
                 do {
                     desired = expected - currentPrice;
-                } while (!balance.compare_exchange_weak(expected, desired));
-                position.store(1);
-                actives.fetch_add(1);
+                } while (!smaBalance.compare_exchange_weak(expected, desired));
+                smaPosition.store(1);
+                smaActives.fetch_add(1);
             }
 
+        }
+    });
+
+    std::thread tickMomentumThread([&priceBuffer, &tickPosition, &tickBalance, &tickActives, &goSleep]() {
+        int tries = 0;
+        const int maxTriesToPredict = 8;
+        const int momentumThreshold = 2;
+        double lastPrice = -1.0;
+        int momentum = 0;
+
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+
+            if (priceBuffer.empty()) {
+                goSleep(tries, maxTriesToPredict);
+                continue;
+            }
+            double currentPrice = priceBuffer.getCurrentPrice();
+            if (lastPrice == currentPrice) {
+                goSleep(tries, maxTriesToPredict);
+                continue;
+            }
+
+            if (lastPrice > 0.0) {
+                double delta = currentPrice - lastPrice;
+                if (delta > 0.0) {
+                    momentum = (momentum >= 0) ? (momentum + 1) : 1;
+                } else if (delta < 0.0) {
+                    momentum = (momentum <= 0) ? (momentum - 1) : -1;
+                } else {
+                    momentum = 0;
+                }
+            }
+
+            lastPrice = currentPrice;
+
+            LOG_INFO("Tick momentum: Current price = "
+                    + std::to_string(currentPrice)
+                    + ", MOMENTUM = " + std::to_string(momentum)
+                    + ", BALANCE = " + std::to_string(tickBalance.load()));
+
+            if (momentum <= -momentumThreshold && tickPosition.load() >= 0) {
+                if (tickActives.load() > 0) {
+                    LOG("EVENT", "Tick momentum selling");
+                    double expected = tickBalance.load();
+                    double desired;
+                    do {
+                        desired = expected + currentPrice;
+                    } while (!tickBalance.compare_exchange_weak(expected, desired));
+                    tickPosition.store(-1);
+                    tickActives.fetch_sub(1);
+                }
+            } else if (momentum >= momentumThreshold && tickPosition.load() <= 0) {
+                LOG("EVENT", "Tick momentum buying");
+                double expected = tickBalance.load();
+                double desired;
+                do {
+                    desired = expected - currentPrice;
+                } while (!tickBalance.compare_exchange_weak(expected, desired));
+                tickPosition.store(1);
+                tickActives.fetch_add(1);
+            }
         }
     });
 

@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <filesystem>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -34,14 +35,18 @@ inline void cleanup_sockets() {}
 using namespace std;
 
 namespace {
+    constexpr const char* FILE_DIR = "files_to_send";
     constexpr const char* FILE_PREFIX = "file_to_send";
-    constexpr int FILE_COUNT = 10000;
+    constexpr int FILE_COUNT = 2500;
 }
 
-void sendFile(socket_t socket, const string& filename) {
-    ifstream file(filename, ios::binary);
+void sendFile(socket_t socket, const string& filePath) {
+    std::filesystem::path path(filePath);
+    const string filename = path.filename().string();
+
+    ifstream file(path, ios::binary);
     if (!file) {
-        LOG_ERROR("Failed to open file: " << filename);
+        LOG_ERROR("Failed to open file: " << filePath);
         return;
     }
 
@@ -93,10 +98,20 @@ int main() {
         return 1;
     }
 
+    std::error_code fsError;
+    std::filesystem::create_directories(FILE_DIR, fsError);
+    if (fsError) {
+        LOG_ERROR("Failed to create directory: " << FILE_DIR);
+        close_socket(clientSocket);
+        cleanup_sockets();
+        return 1;
+    }
+
     for (int i = 0; i < FILE_COUNT; ++i) {
-        string filename = string(FILE_PREFIX) + to_string(i);
-        generateDataFile(filename);
-        sendFile(clientSocket, filename);
+        std::filesystem::path filePath = std::filesystem::path(FILE_DIR) / (string(FILE_PREFIX) + to_string(i));
+        string pathStr = filePath.string();
+        generateDataFile(pathStr);
+        sendFile(clientSocket, pathStr);
     }
 
     shutdown(clientSocket,

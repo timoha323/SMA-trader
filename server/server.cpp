@@ -91,12 +91,17 @@ int main() {
     LOG_INFO("Start thread pool on 5 threads");
     ThreadPool threadPool(10);
     PriceBuffer priceBuffer;
+    std::atomic<std::uint64_t> priceTickCounter(0);
     atomic<int> smaPosition(0); // long = 1; short = -1; neutral = 0
     atomic<double> smaBalance(100'000.0);
     atomic<int> smaActives(10);
     atomic<int> tickPosition(0); // long = 1; short = -1; neutral = 0
     atomic<double> tickBalance(100'000.0);
     atomic<int> tickActives(10);
+    atomic<int> vwapPosition(0); // long = 1; short = -1; neutral = 0
+    atomic<double> vwapBalance(100'000.0);
+    atomic<int> vwapActives(10);
+    constexpr double initialBalance = 100'000.0;
     const string outputDir = "files";
     std::error_code fsError;
     std::filesystem::create_directories(outputDir, fsError);
@@ -233,6 +238,99 @@ int main() {
         }
     });
 
+    std::thread vwapDeviationThread([&priceBuffer, &vwapPosition, &vwapBalance, &vwapActives, &goSleep]() {
+        int tries = 0;
+        const int maxTriesToPredict = 8;
+        const double deviationThreshold = 0.003; // 0.3% deviation band for mean reversion
+        double lastPrice = -1.0;
+
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+
+            if (priceBuffer.empty()) {
+                goSleep(tries, maxTriesToPredict);
+                continue;
+            }
+            double currentPrice = priceBuffer.getCurrentPrice();
+            if (lastPrice == currentPrice) {
+                goSleep(tries, maxTriesToPredict);
+                continue;
+            }
+            lastPrice = currentPrice;
+
+            double vwap = priceBuffer.getVWAP();
+            double upperBand = vwap * (1.0 + deviationThreshold);
+            double lowerBand = vwap * (1.0 - deviationThreshold);
+
+            LOG_INFO("VWAP deviation: Current price = "
+                    + std::to_string(currentPrice)
+                    + ", VWAP = " + std::to_string(vwap)
+                    + ", BALANCE = " + std::to_string(vwapBalance.load()));
+
+            if (currentPrice > upperBand && vwapPosition.load() >= 0) {
+                if (vwapActives.load() > 0) {
+                    LOG("EVENT", "VWAP mean reversion selling");
+                    double expected = vwapBalance.load();
+                    double desired;
+                    do {
+                        desired = expected + currentPrice;
+                    } while (!vwapBalance.compare_exchange_weak(expected, desired));
+                    vwapPosition.store(-1);
+                    vwapActives.fetch_sub(1);
+                }
+            } else if (currentPrice < lowerBand && vwapPosition.load() <= 0) {
+                LOG("EVENT", "VWAP mean reversion buying");
+                double expected = vwapBalance.load();
+                double desired;
+                do {
+                    desired = expected - currentPrice;
+                } while (!vwapBalance.compare_exchange_weak(expected, desired));
+                vwapPosition.store(1);
+                vwapActives.fetch_add(1);
+            }
+        }
+    });
+
+    std::thread comparisonThread([&priceBuffer,
+                                  &priceTickCounter,
+                                  &smaBalance, &tickBalance, &vwapBalance,
+                                  &smaActives, &tickActives, &vwapActives,
+                                  initialBalance]() {
+        constexpr std::uint64_t batchSize = 2500;
+        std::uint64_t nextReport = batchSize;
+
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            auto processed = priceTickCounter.load();
+            if (processed < nextReport || priceBuffer.empty()) {
+                continue;
+            }
+
+            double currentPrice = priceBuffer.getCurrentPrice();
+            auto equity = [&](double balance, int actives) {
+                return balance + currentPrice * actives;
+            };
+
+            double smaEquity = equity(smaBalance.load(), smaActives.load());
+            double tickEquity = equity(tickBalance.load(), tickActives.load());
+            double vwapEquity = equity(vwapBalance.load(), vwapActives.load());
+
+            LOG_INFO("\033[32mStrategy comparison after "
+                + std::to_string(processed) + " ticks: price=" + std::to_string(currentPrice)
+                + " | SMA equity=" + std::to_string(smaEquity)
+                + " (" + std::to_string(smaEquity - initialBalance) + ")"
+                + " | Tick equity=" + std::to_string(tickEquity)
+                + " (" + std::to_string(tickEquity - initialBalance) + ")"
+                + " | VWAP equity=" + std::to_string(vwapEquity)
+                + " (" + std::to_string(vwapEquity - initialBalance) + ")"
+                + "\033[0m"
+            );
+
+            nextReport += batchSize;
+        }
+    });
+
 
     while (true) {
         socket_t clientSocket = accept(serverSocket, nullptr, nullptr);
@@ -270,11 +368,12 @@ int main() {
 
             LOG_INFO("Received file " + fileName + " as #" + to_string(counter));
 
-            threadPool.enqueue([counter, fullPath, &priceBuffer]() {
+            threadPool.enqueue([counter, fullPath, &priceBuffer, &priceTickCounter]() {
                 LOG_INFO("Task " + to_string(counter) + " started");
                 PriceFile file(fullPath);
                 for (const auto& timeAndPrice : file.timeToPrice) {
                     priceBuffer.push(timeAndPrice.second);
+                    priceTickCounter.fetch_add(1, std::memory_order_relaxed);
                 }
                 // LOG_INFO("Price Buffer updated. Current price: "
                 //     + to_string(priceBuffer.getCurrentPrice())

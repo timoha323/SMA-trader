@@ -15,6 +15,7 @@ public:
     void push(double value);
     double getAverage();
     double getCurrentPrice();
+    double getVWAP();
 
     bool empty();
 

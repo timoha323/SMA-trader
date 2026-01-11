@@ -29,6 +29,20 @@ double PriceBuffer::getCurrentPrice() {
     return priceBuffer_.back();
 }
 
+double PriceBuffer::getVWAP() {
+    SpinLockGuard spinlockGuard(onWriteMutex_);
+    double weightedSum = 0.0;
+    double totalVolume = 0.0;
+    double volume = 1.0;
+
+    for (double price : priceBuffer_) {
+        weightedSum += price * volume;
+        totalVolume += volume;
+    }
+
+    return weightedSum / totalVolume;
+}
+
 bool PriceBuffer::empty() {
     SpinLockGuard spinlockGuard(onWriteMutex_);
     return priceBuffer_.empty();

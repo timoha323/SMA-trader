@@ -1,7 +1,0 @@
-# ninja log v6
-114	1822	7896128614734737	CMakeFiles/server.dir/C_/Users/makar/sma/SMA-trader/tools/SMA/price_buffer.cpp.obj	5ad6dd9e958d4859
-65	1174	7896145927811716	server.exe	982576b487ab0d9e
-107	2483	7896128614664447	CMakeFiles/server.dir/C_/Users/makar/sma/SMA-trader/file_processing/file_proccessing.cpp.obj	e984ec6e31b0dc7
-82	11583	7896133320176554	CMakeFiles/server.dir/server.cpp.obj	ec17ee14ea94b5cb
-8	5059	7896150421225997	CMakeFiles/server.dir/server.cpp.obj	ec17ee14ea94b5cb
-5059	5351	7896150471737839	server.exe	982576b487ab0d9e
